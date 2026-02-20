@@ -238,3 +238,77 @@ Les learning rates faibles (0.02–0.03) combinés à un nombre élevé d'arbres
 ### Combinaison des modèles (blending)
 
 Plutôt que de choisir un seul modèle, j'ai combiné les prédictions des trois modèles par **moyenne pondérée** :
+
+
+Le choix initial des poids a été guidé par les performances individuelles de chaque modèle en validation croisée : HistGBM avait la meilleure PR-AUC, d'où son poids plus élevé. J'ai ensuite ajusté manuellement les poids en testant plusieurs configurations et en soumettant les résultats, jusqu'à trouver la combinaison la plus performante.
+
+L'intérêt du blending est que chaque modèle capte des patterns légèrement différents. Même si les trois sont des modèles de boosting, leurs implémentations diffèrent (algorithme d'optimisation, gestion des valeurs manquantes, méthode de régularisation), ce qui crée une complémentarité.
+
+---
+
+## Résultats
+
+### Prédictions sur l'échantillon de test
+
+Les trois modèles ont été entraînés sur l'ensemble des données d'entraînement puis appliqués à l'échantillon de test :
+
+| Modèle (poids) | Min | Max | Moyenne |
+|----------------|-----|-----|---------|
+| GradientBoosting (0.25) | 0.0001 | 0.9849 | 0.0130 |
+| XGBoost (0.10) | 0.0002 | 0.9909 | 0.1996 |
+| HistGBM (0.65) | 0.0004 | 0.9877 | 0.2251 |
+| **Blend final** | **0.0004** | **0.9840** | **0.1695** |
+
+Les moyennes des probabilités prédites diffèrent fortement entre les modèles : GradientBoosting produit une moyenne proche du taux de fraude réel (1.3 %), tandis que XGBoost et HistGBM ont des moyennes plus élevées (20 % et 22 %). Cette différence vient du rééquilibrage des classes : `scale_pos_weight` et `class_weight='balanced'` gonflent les probabilités prédites pour mieux discriminer les fraudes. Cela n'affecte pas la qualité du classement (et donc la PR-AUC), car ce qui compte est l'**ordre relatif** des probabilités et non leur valeur absolue.
+
+### Performance finale
+
+La soumission sur les données de test a donné un score de :
+
+### **PR-AUC = 0.1978**
+
+| Méthode | PR-AUC | Amélioration |
+|---------|--------|--------------|
+| Benchmark 1 (aléatoire) | 0.017 | -- |
+| Benchmark 2 (ML optimisé) | 0.140 | -- |
+| **Notre modèle** | **0.1978** | **+41 % vs Benchmark 2** |
+
+Notre modèle dépasse le benchmark 2 de plus de **41 %** en termes relatifs. Il est environ **11.6 fois meilleur** qu'un modèle aléatoire.
+
+### Interprétation du score
+
+Un PR-AUC de 0.1978 peut sembler faible en valeur absolue, mais il faut le replacer dans le contexte d'un taux de fraude de seulement 1.4 %. Un modèle aléatoire obtient un PR-AUC de 0.014 (environ le taux de fraude), ce qui montre que notre modèle fait nettement mieux que le hasard.
+
+La PR-AUC mesure la capacité du modèle à classer les fraudes devant les non-fraudes dans l'ordre des probabilités prédites. Une valeur de 0.1978 signifie que le modèle identifie correctement une proportion significative de fraudes parmi les transactions jugées les plus suspectes, tout en maintenant un niveau de précision acceptable.
+
+Dans un contexte opérationnel, ce modèle permettrait de concentrer les vérifications manuelles sur les transactions les plus à risque, réduisant considérablement le nombre de fraudes non détectées par rapport à un contrôle aléatoire.
+
+---
+
+## Difficultés et limites
+
+### Overfitting du target encoding
+
+L'encodage par la cible (target encoding) introduit un risque de fuite d'information : le taux de fraude d'un groupe est calculé sur les mêmes données qui servent à l'entraînement. J'ai tenté d'atténuer ce problème en utilisant un lissage important (paramètre m entre 20 et 50), mais un target encoding par validation croisée aurait pu réduire davantage cet effet. Toutefois, cette approche augmente significativement le temps de calcul, ce qui m'a conduit à faire un compromis entre rigueur et faisabilité.
+
+### Limites des données
+
+Les variables disponibles décrivent uniquement le contenu du panier. Des informations supplémentaires comme l'historique du client, le canal d'achat, l'heure de la transaction ou la géolocalisation auraient probablement permis d'améliorer sensiblement les performances. Le modèle est donc limité par la richesse des données disponibles.
+
+### Ajustement manuel des poids
+
+Les poids du blending ont été ajustés manuellement par essais successifs. Une approche plus rigoureuse aurait consisté à utiliser une régression logistique ou une optimisation automatique sur les prédictions out-of-fold pour déterminer les poids optimaux. Néanmoins, l'ajustement manuel a permis d'atteindre un résultat satisfaisant.
+
+---
+
+## Conclusion
+
+Ce projet m'a permis de mettre en pratique une démarche complète de machine learning appliquée à la détection de fraude. L'analyse exploratoire a révélé que les fraudes ciblent principalement les produits électroniques de marque à forte valeur (Apple, Computers, Téléphones), avec des paniers dont le prix maximum se situe entre 1 000 et 3 000 €.
+
+Le feature engineering a joué un rôle central en transformant les 144 variables brutes en features plus informatives : agrégats de prix, mesures de diversité, indicateurs de risque et combinaisons catégorielles. L'approche par blending de trois modèles de gradient boosting a permis de tirer parti de la complémentarité des algorithmes.
+
+Le score final de **PR-AUC = 0.1978** dépasse le benchmark de 41 %, ce qui valide l'approche adoptée. Des améliorations seraient possibles notamment par un target encoding par validation croisée, une optimisation automatique des poids du blend, ou l'ajout de features plus complexes basées sur les interactions entre items du panier.
+
+---
+
+
